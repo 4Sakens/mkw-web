@@ -1,11 +1,31 @@
-/*! coi-serviceworker - Guido Zuidhof, licensed under MIT */
-/* Service Worker: intercepts all fetches and adds COOP/COEP headers. */
+/*! coi-serviceworker - Guido Zuidhof, licensed under MIT (modified) */
+/* Service Worker: adds COOP/COEP headers + rewrites absolute paths for GitHub Pages subdir hosting. */
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));
+
+// The WASM binary hardcodes absolute fetch paths like /blobs/*, /play/*, etc.
+// On GitHub Pages the site lives at /mkw-web/, so rewrite those to the correct subdir.
+const BASE = new URL("./", self.registration.scope).pathname;
+const REWRITE_PREFIXES = ["/blobs/", "/play/", "/game/"];
+
+function rewriteUrl(url) {
+  const u = new URL(url);
+  if (u.origin !== self.location.origin) return url;
+  for (const prefix of REWRITE_PREFIXES) {
+    if (u.pathname.startsWith(prefix) && !u.pathname.startsWith(BASE)) {
+      u.pathname = BASE + u.pathname.slice(1);
+      return u.href;
+    }
+  }
+  return url;
+}
+
 self.addEventListener("fetch", (e) => {
   if (e.request.cache === "only-if-cached" && e.request.mode !== "same-origin") return;
+  const rewritten = rewriteUrl(e.request.url);
+  const req = rewritten !== e.request.url ? new Request(rewritten, e.request) : e.request;
   e.respondWith(
-    fetch(e.request).then((r) => {
+    fetch(req).then((r) => {
       if (r.status === 0) return r;
       const headers = new Headers(r.headers);
       headers.set("Cross-Origin-Embedder-Policy", "require-corp");
