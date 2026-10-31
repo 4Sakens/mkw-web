@@ -15,14 +15,38 @@
   #fullscreen:hover { opacity: 1; }
   #status { position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%); padding: 4px 12px; color: var(--muted); background: rgb(0 0 0 / 60%); border-radius: 4px; font-variant-numeric: tabular-nums; pointer-events: none; }
   #status[hidden] { display: none; }
+
+  /* Download overlay */
+  #dl-overlay { position: fixed; inset: 0; background: #000; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 100; gap: 12px; padding: 16px; }
+  #dl-overlay[hidden] { display: none; }
+  #dl-overlay h2 { margin: 0; font-size: 18px; color: var(--fg); }
+  #dl-overlay p { margin: 0; color: var(--muted); font-size: 13px; text-align: center; max-width: 400px; }
+  #dl-progress { width: min(400px, 80vw); height: 8px; accent-color: #6f9ef0; }
+  #dl-status { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 13px; }
+  #dl-error { color: #f66; font-size: 13px; max-width: 400px; text-align: center; }
+  #dl-error[hidden] { display: none; }
+  #dl-retry { font: inherit; padding: 6px 16px; border: 1px solid var(--line); border-radius: 6px; background: var(--fg); color: #000; cursor: pointer; }
+  #dl-retry[hidden] { display: none; }
 </style>
 </head>
 <body>
+
+<!-- Download overlay (shown on first visit while game data is fetched) -->
+<div id="dl-overlay" hidden>
+  <h2>MKW Web Port</h2>
+  <p>Downloading game data. This is a one-time setup (~2.5 GB). The game will launch automatically when done.</p>
+  <progress id="dl-progress" value="0" max="1"></progress>
+  <div id="dl-status">Preparing…</div>
+  <div id="dl-error" hidden></div>
+  <button id="dl-retry" hidden>Retry</button>
+</div>
+
 <div class="stage" id="stage">
   <canvas id="canvas" width="854" height="480" tabindex="0"></canvas>
   <button id="fullscreen" type="button" title="Full screen (Esc to leave)">Full screen</button>
   <div id="status">Loading&hellip;</div>
 </div>
+
 <script>
   const statusLine = document.getElementById('status');
   const setStatus = (text, visible) => { statusLine.textContent = text; statusLine.hidden = !visible; };
@@ -47,30 +71,85 @@
     else document.getElementById('stage').requestFullscreen().then(() => canvasEl.focus(), () => {});
   });
 </script>
-<script>
-  const variant = new URLSearchParams(location.search).get('build') === 'safe' ? 'WiiCompiled-safe' : 'WiiCompiled';
-  const measureDisplayHz = () => new Promise((resolve) => {
-    const stamps = [];
-    const tick = (t) => {
-      stamps.push(t);
-      if (stamps.length < 40) requestAnimationFrame(tick);
-      else {
-        const gaps = stamps.slice(1).map((v, i) => v - stamps[i]).sort((a, b) => a - b);
-        resolve(1000 / gaps[gaps.length >> 1]);
+
+<script type="module">
+  import { isGameDataReady, downloadGameData, TOTAL_BYTES } from './loader.js';
+
+  const mib = (n) => (n / 1048576).toFixed(0);
+
+  function launchGame() {
+    const variant = new URLSearchParams(location.search).get('build') === 'safe' ? 'WiiCompiled-safe' : 'WiiCompiled';
+    const measureDisplayHz = () => new Promise((resolve) => {
+      const stamps = [];
+      const tick = (t) => {
+        stamps.push(t);
+        if (stamps.length < 40) requestAnimationFrame(tick);
+        else {
+          const gaps = stamps.slice(1).map((v, i) => v - stamps[i]).sort((a, b) => a - b);
+          resolve(1000 / gaps[gaps.length >> 1]);
+        }
+      };
+      requestAnimationFrame(tick);
+      setTimeout(() => resolve(60), 2000);
+    });
+    measureDisplayHz().then((hz) => {
+      const params = new URLSearchParams(location.search);
+      window.mkwDisplayHz = params.get('interp') === '0' ? 60 : Math.round(hz);
+      console.log('[page] display refresh ~' + window.mkwDisplayHz + ' Hz');
+      console.log('[page] loading play/' + variant + '.js');
+      const script = document.createElement('script');
+      script.src = 'play/' + variant + '.js';
+      document.body.appendChild(script);
+    });
+  }
+
+  async function run() {
+    const ready = await isGameDataReady();
+    if (ready) {
+      console.log('[loader] game data present in OPFS, launching');
+      launchGame();
+      return;
+    }
+
+    // Show download overlay
+    const overlay = document.getElementById('dl-overlay');
+    const progress = document.getElementById('dl-progress');
+    const dlStatus = document.getElementById('dl-status');
+    const dlError = document.getElementById('dl-error');
+    const retryBtn = document.getElementById('dl-retry');
+    overlay.hidden = false;
+
+    async function doDownload() {
+      dlError.hidden = true;
+      retryBtn.hidden = true;
+      progress.value = 0;
+      dlStatus.textContent = 'Starting download…';
+
+      try {
+        await downloadGameData((loaded, total, archiveName) => {
+          progress.value = loaded / total;
+          dlStatus.textContent = mib(loaded) + ' / ' + mib(total) + ' MB' +
+            (archiveName ? ' — ' + archiveName : '');
+        });
+
+        dlStatus.textContent = 'Download complete! Launching game…';
+        await new Promise((r) => setTimeout(r, 500));
+        overlay.hidden = true;
+        launchGame();
+      } catch (err) {
+        console.error('[loader] download failed:', err);
+        dlError.textContent = 'Download failed: ' + (err.message || err) + '. Check your connection and try again.';
+        dlError.hidden = false;
+        retryBtn.hidden = false;
+        dlStatus.textContent = 'Stopped.';
       }
-    };
-    requestAnimationFrame(tick);
-    setTimeout(() => resolve(60), 2000);
-  });
-  measureDisplayHz().then((hz) => {
-    const params = new URLSearchParams(location.search);
-    window.mkwDisplayHz = params.get('interp') === '0' ? 60 : Math.round(hz);
-    console.log('[page] display refresh ~' + window.mkwDisplayHz + ' Hz');
-    console.log('[page] loading play/' + variant + '.js');
-    const script = document.createElement('script');
-    script.src = 'play/' + variant + '.js';
-    document.body.appendChild(script);
-  });
+    }
+
+    retryBtn.addEventListener('click', doDownload);
+    doDownload();
+  }
+
+  run();
 </script>
 </body>
 </html>
