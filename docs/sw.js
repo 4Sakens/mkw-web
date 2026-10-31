@@ -22,13 +22,17 @@ function rewriteUrl(url) {
 
 self.addEventListener("fetch", (e) => {
   if (e.request.cache === "only-if-cached" && e.request.mode !== "same-origin") return;
+  // Let cross-origin requests (e.g. GitHub Release downloads) pass through untouched.
+  const reqUrl = new URL(e.request.url);
+  if (reqUrl.origin !== self.location.origin) return;
+
   const rewritten = rewriteUrl(e.request.url);
   const req = rewritten !== e.request.url ? new Request(rewritten, e.request) : e.request;
   e.respondWith(
     fetch(req).then((r) => {
       if (r.status === 0) return r;
       const headers = new Headers(r.headers);
-      headers.set("Cross-Origin-Embedder-Policy", "require-corp");
+      headers.set("Cross-Origin-Embedder-Policy", "credentialless");
       headers.set("Cross-Origin-Opener-Policy", "same-origin");
       headers.set("Cross-Origin-Resource-Policy", "same-origin");
       return new Response(r.body, { status: r.status, statusText: r.statusText, headers });
