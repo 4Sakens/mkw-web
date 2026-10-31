@@ -38,69 +38,93 @@ function decodeTarHeader(buf) {
   return { name: fullName, size, isFile, isLongName, isPax };
 }
 
-async function* tarEntries(reader) {
-  let buffer = new Uint8Array(0);
-  let longName = null;
+// Buffered reader that avoids O(n²) copies by using a chunk queue.
+function makeBufferedReader(reader) {
+  const chunks = [];
+  let totalLen = 0;
+  let eof = false;
 
-  function append(chunk) {
-    const merged = new Uint8Array(buffer.length + chunk.length);
-    merged.set(buffer);
-    merged.set(chunk, buffer.length);
-    buffer = merged;
-  }
-
-  async function need(n) {
-    while (buffer.length < n) {
+  async function fillTo(n) {
+    while (totalLen < n && !eof) {
       const { done, value } = await reader.read();
-      if (done) return false;
-      append(value);
+      if (done) { eof = true; return; }
+      chunks.push(value);
+      totalLen += value.length;
     }
-    return true;
   }
 
   function consume(n) {
-    const out = buffer.subarray(0, n);
-    buffer = buffer.slice(n);
+    const out = new Uint8Array(n);
+    let written = 0;
+    while (written < n) {
+      const chunk = chunks[0];
+      const take = Math.min(chunk.length, n - written);
+      out.set(chunk.subarray(0, take), written);
+      written += take;
+      if (take === chunk.length) {
+        chunks.shift();
+      } else {
+        chunks[0] = chunk.subarray(take);
+      }
+    }
+    totalLen -= n;
     return out;
   }
 
+  async function skip(n) {
+    let remaining = n;
+    while (remaining > 0) {
+      if (chunks.length === 0) await fillTo(1);
+      if (eof && chunks.length === 0) return;
+      const chunk = chunks[0];
+      if (chunk.length <= remaining) {
+        remaining -= chunk.length;
+        totalLen -= chunk.length;
+        chunks.shift();
+      } else {
+        chunks[0] = chunk.subarray(remaining);
+        totalLen -= remaining;
+        remaining = 0;
+      }
+    }
+  }
+
+  return {
+    async read(n) { await fillTo(n); return totalLen >= n ? consume(n) : null; },
+    skip,
+  };
+}
+
+async function* tarEntries(reader) {
+  const buf = makeBufferedReader(reader);
+  let longName = null;
+
   while (true) {
-    if (!(await need(512))) return;
-    const header = consume(512);
-    // Two zero blocks = end of archive
+    const header = await buf.read(512);
+    if (!header) return;
     if (header.every((b) => b === 0)) return;
 
     const entry = decodeTarHeader(header);
     const paddedSize = Math.ceil(entry.size / 512) * 512;
 
     if (entry.isLongName) {
-      if (!(await need(paddedSize))) return;
-      const data = consume(paddedSize);
+      const data = await buf.read(paddedSize);
+      if (!data) return;
       longName = new TextDecoder().decode(data.subarray(0, entry.size)).replace(/\0+$/, '');
       continue;
     }
 
-    if (entry.isPax) {
-      if (!(await need(paddedSize))) return;
-      consume(paddedSize);
+    if (entry.isPax || !entry.isFile || entry.size === 0) {
+      if (paddedSize > 0) await buf.skip(paddedSize);
       continue;
     }
 
-    if (longName) {
-      entry.name = longName;
-      longName = null;
-    }
+    if (longName) { entry.name = longName; longName = null; }
 
-    if (!entry.isFile || entry.size === 0) {
-      if (entry.size > 0) {
-        if (!(await need(paddedSize))) return;
-        consume(paddedSize);
-      }
-      continue;
-    }
-
-    if (!(await need(paddedSize))) return;
-    const fileData = consume(paddedSize).slice(0, entry.size);
+    const fileData = await buf.read(entry.size);
+    if (!fileData) return;
+    const padding = paddedSize - entry.size;
+    if (padding > 0) await buf.skip(padding);
     yield { name: entry.name, data: fileData };
   }
 }
