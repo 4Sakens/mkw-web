@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MKW Web</title>
+<script src="coi-serviceworker.js" type="module"></script>
+<style>
+  :root { color-scheme: light dark; --fg: #e8e8e6; --muted: #8d8d88; --line: #2c2c29; }
+  html, body { height: 100%; }
+  body { margin: 0; overflow: hidden; background: #000; color: var(--fg); font: 14px/1.45 system-ui, sans-serif; }
+  .stage { position: fixed; inset: 0; background: #000; display: flex; align-items: center; justify-content: center; }
+  canvas { width: min(100vw, calc(100vh * 854 / 480)); height: min(100vh, calc(100vw * 480 / 854)); display: block; outline: none; }
+  #fullscreen { position: absolute; top: 8px; right: 8px; padding: 4px 10px; font: inherit; color: var(--fg); background: rgb(0 0 0 / 55%); border: 1px solid var(--line); border-radius: 4px; cursor: pointer; opacity: .35; }
+  #fullscreen:hover { opacity: 1; }
+  #status { position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%); padding: 4px 12px; color: var(--muted); background: rgb(0 0 0 / 60%); border-radius: 4px; font-variant-numeric: tabular-nums; pointer-events: none; }
+  #status[hidden] { display: none; }
+</style>
+</head>
+<body>
+<div class="stage" id="stage">
+  <canvas id="canvas" width="854" height="480" tabindex="0"></canvas>
+  <button id="fullscreen" type="button" title="Full screen (Esc to leave)">Full screen</button>
+  <div id="status">Loading&hellip;</div>
+</div>
+<script>
+  const statusLine = document.getElementById('status');
+  const setStatus = (text, visible) => { statusLine.textContent = text; statusLine.hidden = !visible; };
+
+  if (!self.crossOriginIsolated) console.warn('NOT crossOriginIsolated: threads will not work');
+
+  var Module = {
+    canvas: document.getElementById('canvas'),
+    print: (text) => console.log(text),
+    printErr: (text) => console.warn(text),
+    setStatus: (text) => { if (text) setStatus(text, true); },
+    onAbort: (what) => { console.error('ABORT:', what); setStatus('The game stopped. Reload the page to restart.', true); },
+    monitorRunDependencies: (left) => { if (left) setStatus('Loading (' + left + ')…', true); else setStatus('', false); },
+  };
+  const canvasEl = document.getElementById('canvas');
+  canvasEl.addEventListener('click', () => canvasEl.focus());
+  document.getElementById('fullscreen').addEventListener('click', () => {
+    document.getElementById('stage').requestFullscreen().then(() => canvasEl.focus(), () => {});
+  });
+  canvasEl.addEventListener('dblclick', () => {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else document.getElementById('stage').requestFullscreen().then(() => canvasEl.focus(), () => {});
+  });
+</script>
+<script>
+  const variant = new URLSearchParams(location.search).get('build') === 'safe' ? 'WiiCompiled-safe' : 'WiiCompiled';
+  const measureDisplayHz = () => new Promise((resolve) => {
+    const stamps = [];
+    const tick = (t) => {
+      stamps.push(t);
+      if (stamps.length < 40) requestAnimationFrame(tick);
+      else {
+        const gaps = stamps.slice(1).map((v, i) => v - stamps[i]).sort((a, b) => a - b);
+        resolve(1000 / gaps[gaps.length >> 1]);
+      }
+    };
+    requestAnimationFrame(tick);
+    setTimeout(() => resolve(60), 2000);
+  });
+  measureDisplayHz().then((hz) => {
+    const params = new URLSearchParams(location.search);
+    window.mkwDisplayHz = params.get('interp') === '0' ? 60 : Math.round(hz);
+    console.log('[page] display refresh ~' + window.mkwDisplayHz + ' Hz');
+    console.log('[page] loading play/' + variant + '.js');
+    const script = document.createElement('script');
+    script.src = 'play/' + variant + '.js';
+    document.body.appendChild(script);
+  });
+</script>
+</body>
+</html>
