@@ -1,8 +1,6 @@
 // Auto-downloads game data from GitHub Release tar archives into OPFS.
 // Streams each tar sequentially — no library needed.
 
-const REPO = '4Sakens/mkw-web';
-const RELEASE_TAG = 'game-data';
 const ARCHIVES = [
   { name: 'game-data-core.tar', size: 856590848 },
   { name: 'game-data-video.tar', size: 1828199936 },
@@ -146,7 +144,7 @@ export async function downloadGameData(onProgress) {
   let downloaded = 0;
 
   for (const archive of ARCHIVES) {
-    const url = `https://github.com/${REPO}/releases/download/${RELEASE_TAG}/${archive.name}`;
+    const url = new URL(`gamedata/${archive.name}`, self.location.href).href;
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`Failed to fetch ${archive.name}: ${resp.status}`);
 
