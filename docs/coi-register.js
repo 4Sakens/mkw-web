@@ -7,7 +7,7 @@
   const reloaded = sessionStorage.getItem("coiReloadedBySelf");
   sessionStorage.removeItem("coiReloadedBySelf");
 
-  navigator.serviceWorker.register("sw.js").then(
+  navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).then(
     (reg) => {
       if (reg.controller) {
         if (!reloaded) {

@@ -1,5 +1,6 @@
 /*! coi-serviceworker - Guido Zuidhof, licensed under MIT (modified) */
 /* Service Worker: adds COOP/COEP headers + rewrites absolute paths for GitHub Pages subdir hosting. */
+/* v2 */
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));
 

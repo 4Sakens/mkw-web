@@ -137,11 +137,19 @@ async function dirFor(root, parts) {
   return dir;
 }
 
-async function writeFile(dir, name, data) {
-  const h = await dir.getFileHandle(name, { create: true });
-  const w = await h.createWritable();
-  await w.write(data);
-  await w.close();
+async function writeFile(dir, name, data, retries = 3) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const h = await dir.getFileHandle(name, { create: true });
+      const w = await h.createWritable();
+      await w.write(data);
+      await w.close();
+      return;
+    } catch (err) {
+      if (i === retries - 1) throw err;
+      await new Promise(r => setTimeout(r, 50 * (i + 1)));
+    }
+  }
 }
 
 // ── Public API ──
