@@ -158,7 +158,7 @@ export async function isGameDataReady() {
   }
 }
 
-export async function downloadGameData(onProgress) {
+export async function downloadGameData(onProgress, { skipVideos = false } = {}) {
   if (navigator.storage.persist) await navigator.storage.persist();
 
   const root = await navigator.storage.getDirectory();
@@ -166,8 +166,10 @@ export async function downloadGameData(onProgress) {
   const dvd = await dirFor(wc, ['dvd']);
 
   let downloaded = 0;
+  const archives = skipVideos ? ARCHIVES.filter(a => !a.name.includes('video')) : ARCHIVES;
+  const totalBytes = archives.reduce((s, a) => s + a.size, 0);
 
-  for (const archive of ARCHIVES) {
+  for (const archive of archives) {
     const url = new URL(`gamedata/${archive.name}`, self.location.href).href;
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`Failed to fetch ${archive.name}: ${resp.status}`);
@@ -182,7 +184,7 @@ export async function downloadGameData(onProgress) {
         const result = await bodyReader.read();
         if (!result.done) {
           archiveBytes += result.value.length;
-          onProgress(downloaded + archiveBytes, TOTAL_BYTES, archive.name);
+          onProgress(downloaded + archiveBytes, totalBytes, archive.name);
         }
         return result;
       }
@@ -202,7 +204,7 @@ export async function downloadGameData(onProgress) {
     }
 
     downloaded += contentLength;
-    onProgress(downloaded, TOTAL_BYTES, null);
+    onProgress(downloaded, totalBytes, null);
   }
 
   // Write Config.toml

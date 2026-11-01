@@ -27,6 +27,12 @@
   #dl-error[hidden] { display: none; }
   #dl-retry { font: inherit; padding: 6px 16px; border: 1px solid var(--line); border-radius: 6px; background: var(--fg); color: #000; cursor: pointer; }
   #dl-retry[hidden] { display: none; }
+  #dl-choices { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  #dl-choices[hidden] { display: none; }
+  .dl-btn { font: inherit; padding: 8px 20px; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; text-align: center; }
+  .dl-btn-primary { background: var(--fg); color: #000; }
+  .dl-btn-secondary { background: transparent; color: var(--fg); }
+  .dl-btn small { display: block; font-size: 11px; opacity: .7; }
 </style>
 </head>
 <body>
@@ -34,9 +40,13 @@
 <!-- Download overlay (shown on first visit while game data is fetched) -->
 <div id="dl-overlay" hidden>
   <h2>MKW Web Port</h2>
-  <p>Downloading game data. This is a one-time setup (~2.5 GB). The game will launch automatically when done.</p>
-  <progress id="dl-progress" value="0" max="1"></progress>
-  <div id="dl-status">Preparing…</div>
+  <p>First-time setup — download game data to play in your browser. Files are stored locally so you only download once.</p>
+  <div id="dl-choices">
+    <button class="dl-btn dl-btn-primary" id="dl-skip-videos">Play without cutscenes<small>~817 MB — faster</small></button>
+    <button class="dl-btn dl-btn-secondary" id="dl-all">Download everything<small>~2.5 GB — includes cutscenes</small></button>
+  </div>
+  <progress id="dl-progress" value="0" max="1" hidden></progress>
+  <div id="dl-status" hidden>Preparing…</div>
   <div id="dl-error" hidden></div>
   <button id="dl-retry" hidden>Retry</button>
 </div>
@@ -117,9 +127,15 @@
     const dlStatus = document.getElementById('dl-status');
     const dlError = document.getElementById('dl-error');
     const retryBtn = document.getElementById('dl-retry');
+    const choices = document.getElementById('dl-choices');
     overlay.hidden = false;
 
+    let skipVideos = false;
+
     async function doDownload() {
+      choices.hidden = true;
+      progress.hidden = false;
+      dlStatus.hidden = false;
       dlError.hidden = true;
       retryBtn.hidden = true;
       progress.value = 0;
@@ -130,7 +146,7 @@
           progress.value = loaded / total;
           dlStatus.textContent = mib(loaded) + ' / ' + mib(total) + ' MB' +
             (archiveName ? ' — ' + archiveName : '');
-        });
+        }, { skipVideos });
 
         dlStatus.textContent = 'Download complete! Launching game…';
         await new Promise((r) => setTimeout(r, 500));
@@ -145,8 +161,9 @@
       }
     }
 
+    document.getElementById('dl-skip-videos').addEventListener('click', () => { skipVideos = true; doDownload(); });
+    document.getElementById('dl-all').addEventListener('click', () => { skipVideos = false; doDownload(); });
     retryBtn.addEventListener('click', doDownload);
-    doDownload();
   }
 
   run();
