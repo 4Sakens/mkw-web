@@ -202,7 +202,7 @@ export async function isGameDataReady() {
   }
 }
 
-export async function downloadGameData(onProgress, { skipVideos = false } = {}) {
+export async function downloadGameData(onProgress, { skipVideos = false, onStatus } = {}) {
   if (navigator.storage.persist) await navigator.storage.persist();
 
   const root = await navigator.storage.getDirectory();
@@ -214,9 +214,11 @@ export async function downloadGameData(onProgress, { skipVideos = false } = {}) 
   const totalBytes = archives.reduce((s, a) => s + a.size, 0);
 
   for (const archive of archives) {
+    if (onStatus) onStatus(`Connecting to server…`);
     const url = new URL(`gamedata/${archive.name}`, self.location.href).href;
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`Failed to fetch ${archive.name}: ${resp.status}`);
+    if (onStatus) onStatus(null);
 
     const contentLength = parseInt(resp.headers.get('content-length'), 10) || archive.size;
     const bodyReader = resp.body.getReader();

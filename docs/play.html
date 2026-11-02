@@ -146,7 +146,7 @@
           progress.value = loaded / total;
           dlStatus.textContent = mib(loaded) + ' / ' + mib(total) + ' MB' +
             (archiveName ? ' — ' + archiveName : '');
-        }, { skipVideos });
+        }, { skipVideos, onStatus: (msg) => { if (msg) dlStatus.textContent = msg; } });
 
         dlStatus.textContent = 'Download complete! Launching game…';
         await new Promise((r) => setTimeout(r, 500));
