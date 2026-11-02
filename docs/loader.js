@@ -131,9 +131,18 @@ async function* tarEntries(reader) {
 
 // ── OPFS helpers ──
 
+const dirCache = new Map();
+
 async function dirFor(root, parts) {
+  const key = parts.join('/');
+  if (dirCache.has(key)) return dirCache.get(key);
   let dir = root;
-  for (const part of parts) dir = await dir.getDirectoryHandle(part, { create: true });
+  for (let i = 0; i < parts.length; i++) {
+    const subKey = parts.slice(0, i + 1).join('/');
+    if (dirCache.has(subKey)) { dir = dirCache.get(subKey); continue; }
+    dir = await dir.getDirectoryHandle(parts[i], { create: true });
+    dirCache.set(subKey, dir);
+  }
   return dir;
 }
 
@@ -150,6 +159,33 @@ async function writeFile(dir, name, data, retries = 3) {
       await new Promise(r => setTimeout(r, 50 * (i + 1)));
     }
   }
+}
+
+function writeQueue(concurrency = 6) {
+  let running = 0;
+  const queue = [];
+  let error = null;
+
+  function drain() {
+    while (running < concurrency && queue.length > 0 && !error) {
+      const { dir, name, data, resolve, reject } = queue.shift();
+      running++;
+      writeFile(dir, name, data).then(resolve, (err) => { error = err; reject(err); }).finally(() => { running--; drain(); });
+    }
+  }
+
+  return {
+    push(dir, name, data) {
+      if (error) return Promise.reject(error);
+      return new Promise((resolve, reject) => { queue.push({ dir, name, data, resolve, reject }); drain(); });
+    },
+    async flush() {
+      while (running > 0 || queue.length > 0) {
+        await new Promise(r => setTimeout(r, 10));
+      }
+      if (error) throw error;
+    }
+  };
 }
 
 // ── Public API ──
@@ -198,8 +234,9 @@ export async function downloadGameData(onProgress, { skipVideos = false } = {}) 
       }
     };
 
+    const wq = writeQueue(6);
+
     for await (const entry of tarEntries(trackingReader)) {
-      // Strip leading ./ from paths
       let path = entry.name.replace(/^\.\//, '');
       if (!path) continue;
 
@@ -208,8 +245,10 @@ export async function downloadGameData(onProgress, { skipVideos = false } = {}) 
       if (!fileName) continue;
 
       const dir = parts.length > 0 ? await dirFor(dvd, parts) : dvd;
-      await writeFile(dir, fileName, entry.data);
+      wq.push(dir, fileName, entry.data);
     }
+
+    await wq.flush();
 
     downloaded += contentLength;
     onProgress(downloaded, totalBytes, null);
