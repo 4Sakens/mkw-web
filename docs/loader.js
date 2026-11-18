@@ -209,11 +209,15 @@ export async function downloadGameData(onProgress, { skipVideos = false, onStatu
   const wc = await dirFor(root, ['WiiCompiled']);
   const dvd = await dirFor(wc, ['dvd']);
 
-  let downloaded = 0;
   const archives = skipVideos ? ARCHIVES.filter(a => !a.name.includes('video')) : ARCHIVES;
   const totalBytes = archives.reduce((s, a) => s + a.size, 0);
 
-  for (const archive of archives) {
+  // Byte offset of each archive within the full set, so parallel downloads can report accurate progress.
+  const offsets = new Map();
+  let acc = 0;
+  for (const a of ARCHIVES) { offsets.set(a.name, acc); acc += a.size; }
+
+  const downloadArchive = async (archive) => {
     if (onStatus) onStatus(`Connecting to server…`);
     const url = new URL(`gamedata/${archive.name}`, self.location.href).href;
     const resp = await fetch(url);
@@ -230,7 +234,7 @@ export async function downloadGameData(onProgress, { skipVideos = false, onStatu
         const result = await bodyReader.read();
         if (!result.done) {
           archiveBytes += result.value.length;
-          onProgress(downloaded + archiveBytes, totalBytes, archive.name);
+          onProgress((offsets.get(archive.name) || 0) + archiveBytes, totalBytes, archive.name);
         }
         return result;
       }
@@ -252,9 +256,11 @@ export async function downloadGameData(onProgress, { skipVideos = false, onStatu
 
     await wq.flush();
 
-    downloaded += contentLength;
-    onProgress(downloaded, totalBytes, null);
-  }
+    onProgress((offsets.get(archive.name) || 0) + contentLength, totalBytes, null);
+  };
+
+  // The archives are independent tarballs, so download them in parallel instead of one after another.
+  await Promise.all(archives.map(downloadArchive));
 
   // Write Config.toml
   try {
