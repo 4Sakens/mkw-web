@@ -131,7 +131,7 @@
     const choices = document.getElementById('dl-choices');
     overlay.hidden = false;
 
-    let skipVideos = false;
+    let skipVideos = true;
 
     async function doDownload() {
       choices.hidden = true;
@@ -141,6 +141,16 @@
       retryBtn.hidden = true;
       progress.value = 0;
       dlStatus.textContent = 'Starting download…';
+
+      // Warm the SW cache for the WASM binary in parallel with the game data download,
+      // so the launch step right after download is instant.
+      const variant = new URLSearchParams(location.search).get('build') === 'safe' ? 'WiiCompiled-safe' : 'WiiCompiled';
+      const prewarm = (async () => {
+        try {
+          await fetch('play/' + variant + '.js');
+          await fetch('play/' + variant + '.wasm');
+        } catch (e) { /* best-effort: launch falls back to a normal fetch */ }
+      })();
 
       try {
         await downloadGameData((loaded, total, archiveName) => {
